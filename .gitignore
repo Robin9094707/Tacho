@@ -6,3 +6,4 @@ Payload/
 xcodebuild.log
 .DS_Store
 xcuserdata/
+dist/
