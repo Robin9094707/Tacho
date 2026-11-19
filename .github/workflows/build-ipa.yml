@@ -1,0 +1,76 @@
+name: Build IPA
+
+on:
+  push:
+    branches: [ "**" ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Xcode auswählen
+        run: |
+          ls -d /Applications/Xcode*.app || true
+          LATEST=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -n 1)
+          if [ -n "$LATEST" ]; then sudo xcode-select -s "$LATEST/Contents/Developer"; fi
+          xcodebuild -version
+
+      - name: XcodeGen installieren
+        run: brew install xcodegen
+
+      - name: Projekt generieren
+        run: xcodegen generate
+
+      - name: Bauen (unsigniert)
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project Tacho.xcodeproj \
+            -scheme Tacho \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build | tee xcodebuild.log | grep -E "error:|warning: .*(deprecated)|BUILD (SUCCEEDED|FAILED)" || true
+          test -d build/Build/Products/Release-iphoneos/Tacho.app
+
+      - name: Fehlerausgabe
+        if: failure()
+        run: grep -E "error:" -A3 xcodebuild.log | head -n 200 || true
+
+      - name: IPA packen
+        run: |
+          mkdir -p Payload
+          cp -R build/Build/Products/Release-iphoneos/Tacho.app Payload/
+          zip -qry Tacho.ipa Payload
+          ls -lh Tacho.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Tacho-ipa
+          path: Tacho.ipa
+
+      - name: Release veröffentlichen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="build-${{ github.run_number }}"
+          gh release create "$TAG" Tacho.ipa \
+            --target "${{ github.sha }}" \
+            --title "Tacho Build ${{ github.run_number }}" \
+            --notes "Unsignierte IPA von ${GITHUB_REF_NAME} (${GITHUB_SHA::7}). Installation z. B. mit AltStore, Sideloadly oder TrollStore." \
+            --prerelease
