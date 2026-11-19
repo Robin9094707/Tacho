@@ -49,6 +49,8 @@ final class VisualOdometry {
     /// Abstand zum Objekt in Bildmitte (LiDAR) in m.
     var distanceAhead: Double?
     var room = RoomInfo()
+    /// Umgebungshelligkeit laut Kamera (ARKit, ≈1000 = neutral, draußen deutlich mehr).
+    var lightIntensity: Double?
     var position: SIMD3<Float> = .zero
 
     var usesLiDAR: Bool { isRunning && Self.hasLiDAR }
@@ -98,6 +100,7 @@ final class VisualOdometry {
         trackingText = "Aus"
         speed = 0
         samples = []
+        lightIntensity = nil
     }
 
     /// Geschätzte Position: GPS-Ankerpunkt + visuelle Verschiebung (x = Ost, z = Süd).
@@ -140,6 +143,8 @@ final class VisualOdometry {
             trackingOK = false
             trackingText = "Nicht verfügbar"
         }
+
+        if let le = frame.lightEstimate { lightIntensity = Double(le.ambientIntensity) }
 
         let c = cam.transform.columns.3
         let p = SIMD3<Float>(c.x, c.y, c.z)

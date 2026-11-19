@@ -14,6 +14,7 @@ struct SettingsScreen: View {
     @AppStorage(Pref.theme) private var theme: Theme = .activity
     @AppStorage(Pref.haptics) private var haptics = true
     @AppStorage(Pref.indoorMode) private var indoorMode: IndoorMode = .auto
+    @AppStorage(Pref.floorHeight) private var floorHeight: Double = 3.0
     @State private var confirmWipe = false
 
     var body: some View {
@@ -87,8 +88,35 @@ struct SettingsScreen: View {
                     Text("Ist das GPS drinnen zu ungenau, misst Tacho über Kamera (und LiDAR) oder den Schrittzähler weiter und setzt deine Route auf der Karte fort. In Auto, Zug & Co. bleibt GPS maßgeblich, weil die Kamera dort nur das Fahrzeuginnere sieht. Kamera-Tracking braucht freie Sicht und etwas mehr Akku.")
                 }
 
+                Section {
+                    Stepper(value: $floorHeight, in: 2.4...5.0, step: 0.1) {
+                        LabeledContent("Etagenhöhe", value: String(format: "%.1f m", floorHeight))
+                    }
+                    LabeledContent("Aktuelle Etage", value: FloorFormat.text(engine.floor))
+                    LabeledContent("Referenz", value: engine.floorEstimator.source.title)
+                    LabeledContent("Gemerkte Orte", value: "\(engine.floorEstimator.savedPlaceCount)")
+                    Button("Gemerkte Straßenhöhen löschen", role: .destructive) {
+                        engine.floorEstimator.forgetSavedPlaces()
+                    }
+                } header: {
+                    Text("Etagen")
+                } footer: {
+                    Text("Tacho lernt die Straßenhöhe automatisch, sobald du draußen bist, und merkt sie sich pro Ort. Altbauten haben oft 3,5 m, Neubauten etwa 2,8–3 m pro Etage.")
+                }
+
                 Section("Live-Sensoren") {
+                    LabeledContent("Drinnen-Wahrscheinlichkeit", value: "\(Int(engine.indoor.probability * 100)) %")
+                    LabeledContent("Satelliten-Fixes", value: engine.location.gnssRatio.map { "\(Int($0 * 100)) %" } ?? "–")
+                    LabeledContent("Fix-Rate", value: String(format: "%.1f Hz", engine.location.fixRate))
                     LabeledContent("GPS-Genauigkeit", value: engine.location.horizontalAccuracy >= 0 ? String(format: "± %.0f m", engine.location.horizontalAccuracy) : "–")
+                    LabeledContent("Höhengenauigkeit", value: engine.location.verticalAccuracy >= 0 ? String(format: "± %.0f m", engine.location.verticalAccuracy) : "–")
+                    LabeledContent("Indoor-Karten-Etage", value: engine.location.floorLevel.map { "\($0)" } ?? "–")
+                    LabeledContent("Barometer-Höhe", value: engine.motion.absoluteAltitude.map { String(format: "%.1f m NN", $0) } ?? String(format: "%+.1f m (relativ)", engine.motion.relativeAltitude))
+                    LabeledContent("Vertikal", value: String(format: "%+.2f m/s", engine.motion.verticalSpeed))
+                    LabeledContent("Stockwerke (Schrittzähler)", value: engine.motion.floorCountingAvailable ? "↑\(engine.motion.floorsAscended) ↓\(engine.motion.floorsDescended)" : "–")
+                    LabeledContent("Magnetfeld", value: engine.motion.magneticField.map { String(format: "%.0f µT ± %.1f", $0, engine.motion.magneticVariance) } ?? "nicht kalibriert")
+                    LabeledContent("Gier-Rate (30 s max)", value: String(format: "%.2f rad/s", engine.motion.maxYawRate30s))
+                    LabeledContent("Kamera-Helligkeit", value: engine.visual.lightIntensity.map { String(format: "%.0f lm", $0) } ?? "–")
                     LabeledContent("Rohgeschwindigkeit", value: engine.location.rawSpeed >= 0 ? unit.formatSpeed(engine.location.rawSpeed) : "ungültig")
                     LabeledContent("Umgebung", value: engine.place.surroundings.title)
                     LabeledContent("Barometer", value: engine.motion.barometerAvailable ? "verfügbar" : "nicht verfügbar")

@@ -23,6 +23,8 @@ struct ActivityClassifier {
                          system: CMMotionActivity?,
                          stepCadence: Double = 0,
                          nearStation: Bool = false,
+                         maxYawRate: Double = 0,
+                         magneticVariance: Double = 0,
                          now: Date = .now) -> Result {
         speedWindow.append((now, speed))
         speedWindow.removeAll { now.timeIntervalSince($0.0) > 30 }
@@ -89,9 +91,14 @@ struct ActivityClassifier {
                 if steady && avgKmh > 50 { trainScore += 0.6 }
                 if maxKmh > 140 { trainScore += 0.8 }
                 if nearStation { trainScore += 0.6 }
+                // Gyroskop: Züge fahren weite Kurven, Autos biegen ab
+                if maxYawRate < 0.08 && avgKmh > 30 { trainScore += 0.5 }
+                // Magnetometer: E-Loks/Triebwagen erzeugen starke, schwankende Felder
+                if magneticVariance > 4 && avgKmh > 15 { trainScore += 0.6 }
                 // Lange, sanfte Beschleunigung ohne Stop-and-go
                 if avgKmh > 60 && speedStd < 3 && vib < 0.08 { trainScore += 0.4 }
                 var carScore = 0.0
+                if maxYawRate > 0.3 { carScore += 0.8 } else if maxYawRate > 0.18 { carScore += 0.3 }
                 if automotive { carScore += 0.6 }
                 if vib > 0.06 { carScore += 1.0 }
                 if speedStd > 2.5 { carScore += 0.8 }

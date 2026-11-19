@@ -14,7 +14,7 @@ final class PlaceService {
             switch self {
             case .openSky: "Freier Himmel"
             case .partial: "Teilweise abgeschirmt"
-            case .indoor: "Innenraum / Tunnel"
+            case .indoor: "Drinnen"
             case .noSignal: "Kein GPS-Signal"
             }
         }
@@ -36,6 +36,7 @@ final class PlaceService {
     var nearestStation: String?
     var surroundings: Surroundings = .noSignal
     var signalQuality: Double = 0   // 0…1
+    var indoorProbability: Double = 0.5
 
     @ObservationIgnored private let geocoder = CLGeocoder()
     @ObservationIgnored private var lastGeocoded: CLLocation?
@@ -54,10 +55,11 @@ final class PlaceService {
         }
     }
 
-    /// Regelmäßig mit dem letzten GPS-Fix aufrufen.
-    func update(location: CLLocation?, lastFix: Date?, now: Date = .now) {
+    /// Regelmäßig aufrufen – mit dem Ergebnis der Innen/Außen-Sensorfusion.
+    func update(location: CLLocation?, lastFix: Date?, indoor: IndoorDetector.Result, now: Date = .now) {
+        indoorProbability = indoor.probability
         guard let location, let lastFix else {
-            surroundings = .noSignal
+            surroundings = indoor.isIndoor ? .indoor : .noSignal
             signalQuality = 0
             return
         }
@@ -67,17 +69,17 @@ final class PlaceService {
         if accuracyHistory.count > 10 { accuracyHistory.removeFirst() }
         let avgAcc = accuracyHistory.reduce(0, +) / Double(accuracyHistory.count)
 
-        if age > 12 {
-            surroundings = .noSignal
-        } else if age > 5 || avgAcc > 35 {
+        if indoor.isIndoor {
             surroundings = .indoor
-        } else if avgAcc > 12 {
+        } else if age > 12 {
+            surroundings = .noSignal
+        } else if avgAcc > 12 || indoor.probability > 0.4 {
             surroundings = .partial
         } else {
             surroundings = .openSky
         }
         let freshness = max(0, 1 - age / 12)
-        signalQuality = max(0, min(1, (1 - (avgAcc - 3) / 60))) * freshness
+        signalQuality = max(0, min(1, (1 - (avgAcc - 3) / 60))) * freshness * (1 - indoor.probability * 0.6)
 
         geocodeIfNeeded(location)
         lookupStationIfNeeded(location)

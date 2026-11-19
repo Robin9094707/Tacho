@@ -13,6 +13,14 @@ final class TachoEngine {
     let motion = MotionService()
     let place = PlaceService()
     let visual = VisualOdometry()
+    let floorEstimator = FloorEstimator()
+
+    // Innen/Außen-Fusion
+    var indoor = IndoorDetector.Result()
+    @ObservationIgnored private var indoorDetector = IndoorDetector()
+    @ObservationIgnored private var lastVisualAttempt = Date.distantPast
+    @ObservationIgnored private var visualBadSince: Date?
+    @ObservationIgnored private var visualIdleSince: Date?
 
     // Innenraum-Messung
     var indoorMode: IndoorMode = .auto {
@@ -77,15 +85,40 @@ final class TachoEngine {
         }
     }
 
+    /// Echtes Satelliten-GPS: frisch, genau und mit Doppler-Geschwindigkeit (kein WLAN-Fix).
     var gpsIsGood: Bool {
         guard let fix = location.lastFix else { return false }
         return Date.now.timeIntervalSince(fix) < 4
             && location.horizontalAccuracy >= 0
             && location.horizontalAccuracy <= 20
+            && (location.gnssRatio ?? 1) >= 0.5
     }
+
+    /// Sitzt man in einem Fahrzeug? Dann sieht die Kamera nur den Innenraum,
+    /// und schwaches GPS ist kein Zeichen für ein Gebäude.
+    var inVehicle: Bool {
+        let recentFix = location.lastFix.map { Date.now.timeIntervalSince($0) < 20 } ?? false
+        let vehicles: [ActivityType] = [.car, .train, .plane, .eScooter, .cycling]
+        return (vehicles.contains(detected.activity) || vehicles.contains(manualActivity ?? .unknown)
+                || location.speed > 4) && recentFix
+    }
+
+    private var pedometerFresh: Bool {
+        motion.pedometerUpdated.map { Date.now.timeIntervalSince($0) < 5 } ?? false
+    }
+
+    /// Geht man gerade (Schritte gezählt)?
+    private var walkingNow: Bool { pedometerFresh && (motion.stepCadence > 0.5 || motion.pedometerSpeed > 0.3) }
     var isRecording: Bool { state != .idle }
 
-    var floor: Int { Int((motion.relativeAltitude / 3.2).rounded()) }
+    /// Aktuelle Etage (nil = noch unbekannt).
+    var floor: Int? { floorEstimator.floor }
+
+    func setCurrentFloor(_ n: Int) {
+        floorEstimator.setCurrentFloor(n, baroAltitude: motion.baroAltitude,
+                                       baroIsAbsolute: motion.baroIsAbsolute,
+                                       location: location.location)
+    }
 
     init() {
         location.onLocation = { [weak self] loc, v in self?.handle(loc, speed: v) }
@@ -192,8 +225,9 @@ final class TachoEngine {
     // MARK: - Intern
 
     private func onTick() {
-        place.update(location: location.location, lastFix: location.lastFix)
+        updateEnvironment()
         updateSpeedSource()
+        motion.setHighRate(isRecording || speed > 0.3 || walkingNow)
 
         if speedSource != .gps {
             virtualStep()
@@ -226,7 +260,9 @@ final class TachoEngine {
                                      system: motion.systemActivity,
                                      stepCadence: motion.pedometerUpdated.map { Date.now.timeIntervalSince($0) < 4 } == true
                                         ? motion.stepCadence : 0,
-                                     nearStation: place.nearestStation != nil)
+                                     nearStation: place.nearestStation != nil,
+                                     maxYawRate: motion.maxYawRate30s,
+                                     magneticVariance: motion.magneticVariance)
     }
 
     private func handle(_ loc: CLLocation, speed v: Double) {
@@ -313,14 +349,42 @@ final class TachoEngine {
     }
 
     /// Wählt die beste Geschwindigkeitsquelle und startet/stoppt das Kamera-Tracking automatisch.
+    /// Fusioniert alle Sensoren zur Innen/Außen-Erkennung und bestimmt die Etage.
+    private func updateEnvironment() {
+        let fixAge = location.lastFix.map { Date.now.timeIntervalSince($0) }
+        let input = IndoorDetector.Input(
+            gnssRatio: location.gnssRatio,
+            fixRate: location.fixRate,
+            horizontalAccuracy: location.horizontalAccuracy,
+            verticalAccuracy: location.medianVerticalAccuracy,
+            fixAge: fixAge,
+            floorLevel: location.floorLevel,
+            magneticField: motion.magnetometerCalibrated ? motion.magneticField : nil,
+            magneticVariance: motion.magneticVariance,
+            moving: speed > 0.4 || walkingNow,
+            inVehicle: inVehicle,
+            ceilingSeen: visual.isRunning && visual.room.ceilings > 0,
+            wallsSeen: visual.isRunning ? visual.room.walls : 0,
+            lightIntensity: visual.isRunning && visual.trackingOK ? visual.lightIntensity : nil)
+        let result = indoorDetector.update(input)
+        if result != indoor { indoor = result }
+
+        place.update(location: location.location, lastFix: location.lastFix, indoor: result)
+
+        let confidentlyOutdoors = !result.isIndoor && result.probability < 0.2 && gpsIsGood && !inVehicle
+        floorEstimator.update(baroAltitude: motion.baroAltitude,
+                              baroIsAbsolute: motion.baroIsAbsolute,
+                              location: location.location,
+                              confidentlyOutdoors: confidentlyOutdoors,
+                              isIndoor: result.isIndoor,
+                              indoorMapFloor: location.floorLevel)
+    }
+
+    /// Wählt die beste Geschwindigkeitsquelle und startet/stoppt das Kamera-Tracking sparsam.
     private func updateSpeedSource() {
         let now = Date.now
-        let indoor = !gpsIsGood || place.surroundings == .indoor || place.surroundings == .noSignal
-        // In Fahrzeugen sieht die Kamera nur den Innenraum (≈ 0 km/h) – dann bleibt GPS maßgeblich.
-        let recentFix = location.lastFix.map { now.timeIntervalSince($0) < 20 } ?? false
-        let vehicles: [ActivityType] = [.car, .train, .plane, .eScooter, .cycling]
-        let inVehicle = (vehicles.contains(detected.activity) || vehicles.contains(manualActivity ?? .unknown)
-                         || location.speed > 4) && recentFix
+        let indoor = self.indoor.isIndoor || !gpsIsGood
+        let inVehicle = self.inVehicle
 
         if indoor {
             goodGPSSince = nil
@@ -331,12 +395,23 @@ final class TachoEngine {
         }
 
         if indoorMode == .auto && VisualOdometry.isSupported {
-            if let since = indoorSince, now.timeIntervalSince(since) > 5, !visual.isRunning, !inVehicle {
+            // Kamera nur einschalten, wenn man drinnen wirklich unterwegs ist
+            if let since = indoorSince, now.timeIntervalSince(since) > 5, !visual.isRunning, !inVehicle,
+               walkingNow, now.timeIntervalSince(lastVisualAttempt) > 45 {
+                lastVisualAttempt = now
                 visual.start(anchor: location.location)
+                visualBadSince = nil
+                visualIdleSince = nil
             }
-            if let since = goodGPSSince, now.timeIntervalSince(since) > 15,
-               visual.isRunning, !visual.startedManually {
-                visual.stop()
+            if visual.isRunning && !visual.startedManually {
+                // Kamera verdeckt (Tasche) → nach 20 s aus, Schrittzähler übernimmt
+                if visual.trackingOK { visualBadSince = nil } else if visualBadSince == nil { visualBadSince = now }
+                // Länger keine Bewegung → aus
+                if visual.speed > 0.15 || walkingNow { visualIdleSince = nil } else if visualIdleSince == nil { visualIdleSince = now }
+                let bad = visualBadSince.map { now.timeIntervalSince($0) > 20 } ?? false
+                let idle = visualIdleSince.map { now.timeIntervalSince($0) > 60 } ?? false
+                let outside = goodGPSSince.map { now.timeIntervalSince($0) > 15 } ?? false
+                if bad || idle || outside || inVehicle { visual.stop() }
             }
         }
 

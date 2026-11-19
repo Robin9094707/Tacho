@@ -19,6 +19,36 @@ final class LocationService: NSObject, CLLocationManagerDelegate {
     var altitude: Double = 0
     var horizontalAccuracy: Double = -1
     var lastFix: Date?
+    /// Stockwerk aus Indoor-Karten (Flughäfen, Einkaufszentren …), falls Apple es liefert.
+    var floorLevel: Int?
+    var verticalAccuracy: Double = -1
+
+    /// Ein Eintrag pro empfangenem Standort – Grundlage der Innen/Außen-Erkennung.
+    struct FixInfo {
+        let date: Date
+        let horizontalAccuracy: Double
+        let verticalAccuracy: Double
+        /// Satellitenortung liefert Geschwindigkeit & Kurs; WLAN-/Funkzellenortung nicht.
+        let hasDoppler: Bool
+    }
+    @ObservationIgnored private(set) var fixLog: [FixInfo] = []
+
+    /// Anteil der Fixes der letzten 20 s mit gültiger Doppler-Geschwindigkeit (≈ echtes GNSS).
+    var gnssRatio: Double? {
+        let recent = fixLog.filter { Date.now.timeIntervalSince($0.date) < 20 }
+        guard recent.count >= 3 else { return nil }
+        return Double(recent.filter(\.hasDoppler).count) / Double(recent.count)
+    }
+
+    /// Fixes pro Sekunde in den letzten 10 s (GNSS liefert stabil ≈ 1 Hz).
+    var fixRate: Double {
+        Double(fixLog.filter { Date.now.timeIntervalSince($0.date) < 10 }.count) / 10
+    }
+
+    var medianVerticalAccuracy: Double? {
+        let v = fixLog.filter { Date.now.timeIntervalSince($0.date) < 20 }.map(\.verticalAccuracy).sorted()
+        return v.isEmpty ? nil : v[v.count / 2]
+    }
 
     /// Wird für jeden neuen, brauchbaren Standort aufgerufen.
     @ObservationIgnored var onLocation: ((CLLocation, Double) -> Void)?
@@ -79,6 +109,15 @@ final class LocationService: NSObject, CLLocationManagerDelegate {
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {}
 
     private func handle(_ loc: CLLocation) {
+        if abs(loc.timestamp.timeIntervalSinceNow) < 15 {
+            fixLog.append(FixInfo(date: loc.timestamp,
+                                  horizontalAccuracy: loc.horizontalAccuracy,
+                                  verticalAccuracy: loc.verticalAccuracy,
+                                  hasDoppler: loc.speedAccuracy >= 0 && loc.speed >= 0))
+            fixLog.removeAll { Date.now.timeIntervalSince($0.date) > 30 }
+            floorLevel = loc.floor?.level
+            verticalAccuracy = loc.verticalAccuracy
+        }
         guard loc.horizontalAccuracy >= 0, loc.horizontalAccuracy < 200 else {
             horizontalAccuracy = loc.horizontalAccuracy
             return

@@ -40,6 +40,7 @@ enum Pref {
     static let haptics = "haptics"
     static let showMiniMap = "showMiniMap"
     static let indoorMode = "indoorMode"
+    static let floorHeight = "floorHeight"
 }
 
 enum GaugeStyle: String, CaseIterable, Identifiable {

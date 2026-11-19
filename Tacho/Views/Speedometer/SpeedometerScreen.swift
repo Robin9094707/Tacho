@@ -14,6 +14,7 @@ struct SpeedometerScreen: View {
     @State private var showSprint = false
     @State private var showHUD = false
     @State private var showIndoor = false
+    @State private var showFloorSheet = false
     @State private var savedTrip: Trip?
     @Namespace private var glassNS
 
@@ -343,61 +344,129 @@ struct SpeedometerScreen: View {
     }
 
     private var environmentCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label("Umgebung & Raum", systemImage: "building.columns.fill")
-                .font(.headline)
+        let ind = engine.indoor
+        let fe = engine.floorEstimator
+        return VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Label("Umgebung & Raum", systemImage: "building.columns.fill")
+                    .font(.headline)
+                Spacer()
+                Label(engine.place.surroundings.title, systemImage: engine.place.surroundings.symbol)
+                    .font(.footnote.weight(.bold))
+                    .padding(.horizontal, 12).padding(.vertical, 6)
+                    .glassEffect(.regular.tint((ind.isIndoor ? Color.orange : Color.green).opacity(0.35)), in: .capsule)
+                    .contentTransition(.symbolEffect(.replace))
+            }
+
+            // Drinnen/Draußen-Wahrscheinlichkeit
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Label("Draußen", systemImage: "sun.max.fill").foregroundStyle(.green)
+                    Spacer()
+                    Text("\(Int((ind.probability * 100).rounded())) % drinnen")
+                        .monospacedDigit()
+                        .contentTransition(.numericText(value: ind.probability))
+                    Spacer()
+                    Label("Drinnen", systemImage: "house.fill").foregroundStyle(.orange)
+                        .labelStyle(TrailingIconLabelStyle())
+                }
+                .font(.caption.weight(.semibold))
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(LinearGradient(colors: [.green, .yellow, .orange],
+                                                      startPoint: .leading, endPoint: .trailing).opacity(0.35))
+                        Circle()
+                            .fill(.white)
+                            .frame(width: 14, height: 14)
+                            .shadow(color: .black.opacity(0.4), radius: 3)
+                            .offset(x: (Double(geo.size.width) - 14) * ind.probability)
+                    }
+                }
+                .frame(height: 14)
+                .animation(.smooth, value: ind.probability)
+            }
+
+            if !ind.evidence.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(ind.evidence.prefix(4)) { e in
+                        HStack(spacing: 6) {
+                            Image(systemName: e.weight > 0 ? "house.fill" : "sun.max.fill")
+                                .font(.caption2)
+                                .foregroundStyle(e.weight > 0 ? Color.orange : Color.green)
+                                .frame(width: 16)
+                            Text(e.text).font(.caption)
+                        }
+                    }
+                }
+                .foregroundStyle(.secondary)
+            }
+
+            Divider()
+
             HStack(spacing: 14) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("GPS-Signal").font(.caption).foregroundStyle(.secondary)
-                    SignalBars(quality: engine.place.signalQuality, color: colors[1])
-                    Text(engine.location.horizontalAccuracy >= 0
-                         ? String(format: "± %.0f m", engine.location.horizontalAccuracy) : "–")
-                        .font(.caption.monospacedDigit())
-                }
-                Divider().frame(height: 50)
-                VStack(alignment: .leading, spacing: 6) {
                     Text("Etage").font(.caption).foregroundStyle(.secondary)
-                    Text(engine.motion.barometerAvailable ? floorText : "–")
+                    Text(engine.motion.barometerAvailable ? FloorFormat.text(engine.floor) : "–")
                         .font(.system(.title2, design: .rounded).weight(.bold))
                         .contentTransition(.numericText())
-                    Text(String(format: "%+.1f m", engine.motion.relativeAltitude))
+                    Text(fe.heightAboveGround.map { String(format: "%+.1f m", $0) } ?? fe.source.title)
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
                 Divider().frame(height: 50)
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Luftdruck").font(.caption).foregroundStyle(.secondary)
-                    Text(engine.motion.pressureKPa.map { String(format: "%.0f", $0 * 10) } ?? "–")
+                    Text("Höhe NN").font(.caption).foregroundStyle(.secondary)
+                    Text(engine.motion.absoluteAltitude.map { String(format: "%.0f m", $0) } ?? Fmt.altitude(engine.location.altitude))
                         .font(.system(.title2, design: .rounded).weight(.bold))
-                    Text("hPa").font(.caption).foregroundStyle(.secondary)
+                    Text(engine.motion.pressureKPa.map { String(format: "%.1f hPa", $0 * 10) } ?? "–")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+                Divider().frame(height: 50)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("GPS").font(.caption).foregroundStyle(.secondary)
+                    SignalBars(quality: engine.place.signalQuality, color: colors[1])
+                    Text(engine.location.gnssRatio.map { "\(Int($0 * 100)) % Sat." } ?? "–")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 0)
             }
+
+            let vm = engine.motion.verticalMotion
+            if vm != .none {
+                Label("\(vm.title) · \(String(format: "%.1f m/s", abs(engine.motion.verticalSpeed)))", systemImage: vm.symbol)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.cyan)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+
             HStack {
-                Image(systemName: engine.place.surroundings.symbol)
-                Text(surroundingsHint).font(.footnote)
+                Text(floorHint).font(.footnote).foregroundStyle(.secondary)
                 Spacer()
-                Button("Etage 0") { engine.motion.recalibrateFloor() }
+                Button("Etage festlegen") { showFloorSheet = true }
                     .buttonStyle(.glass)
                     .font(.caption.weight(.semibold))
             }
-            .foregroundStyle(.secondary)
         }
         .padding(16)
         .glassEffect(.regular, in: .rect(cornerRadius: 26))
+        .animation(.smooth, value: engine.motion.verticalMotion)
+        .sheet(isPresented: $showFloorSheet) {
+            FloorPickerSheet(current: engine.floor ?? 0) { engine.setCurrentFloor($0) }
+                .presentationDetents([.height(320)])
+        }
     }
 
-    private var floorText: String {
-        let f = engine.floor
-        return f == 0 ? "EG" : (f > 0 ? "\(f). OG" : "\(-f). UG")
-    }
-
-    private var surroundingsHint: String {
-        switch engine.place.surroundings {
-        case .openSky: "Beste Messgenauigkeit draußen."
-        case .partial: "Gebäude oder Bäume schirmen teilweise ab."
-        case .indoor: "Du bist vermutlich drinnen, in einem Zug oder Tunnel."
-        case .noSignal: "Kein Fix – geh nach draußen oder ans Fenster."
+    private var floorHint: String {
+        let fe = engine.floorEstimator
+        if !engine.motion.barometerAvailable { return "Kein Barometer verfügbar." }
+        switch fe.source {
+        case .none: return "Geh kurz nach draußen – dann kennt Tacho die Straßenhöhe – oder lege die Etage fest."
+        case .learnedOutdoors: return "Straßenhöhe draußen gemessen."
+        case .savedPlace: return "Straßenhöhe von diesem Ort gemerkt."
+        case .manual: return "Etage manuell kalibriert."
+        case .indoorMap: return "Etage aus Apples Indoor-Karte."
         }
     }
 
@@ -476,5 +545,58 @@ struct HUDScreen: View {
         }
         .statusBarHidden()
         .persistentSystemOverlays(.hidden)
+    }
+}
+
+enum FloorFormat {
+    static func text(_ floor: Int?) -> String {
+        guard let f = floor else { return "?" }
+        return f == 0 ? "EG" : (f > 0 ? "\(f). OG" : "\(-f). UG")
+    }
+}
+
+struct TrailingIconLabelStyle: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 4) {
+            configuration.title
+            configuration.icon
+        }
+    }
+}
+
+/// „Ich bin gerade auf Etage …“
+struct FloorPickerSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @State var current: Int
+    var onSet: (Int) -> Void
+
+    var body: some View {
+        VStack(spacing: 18) {
+            Text("Auf welcher Etage bist du?")
+                .font(.headline)
+                .padding(.top, 20)
+            Picker("Etage", selection: $current) {
+                ForEach(Array((-3...40).reversed()), id: \.self) { f in
+                    Text(FloorFormat.text(f)).tag(f)
+                }
+            }
+            .pickerStyle(.wheel)
+            .frame(height: 140)
+            Button {
+                onSet(current)
+                dismiss()
+            } label: {
+                Text("Übernehmen")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 6)
+            }
+            .buttonStyle(.glassProminent)
+            .padding(.horizontal, 24)
+            Text("Tacho merkt sich die Straßenhöhe für diesen Ort.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.bottom, 16)
     }
 }

@@ -6,6 +6,7 @@ struct RootView: View {
     @AppStorage(Pref.keepAwake) private var keepAwake = true
     @AppStorage(Pref.autoPause) private var autoPause = true
     @AppStorage(Pref.indoorMode) private var indoorMode: IndoorMode = .auto
+    @AppStorage(Pref.floorHeight) private var floorHeight: Double = 3.0
     @State private var tab = 0
 
     var body: some View {
@@ -35,7 +36,9 @@ struct RootView: View {
             UIApplication.shared.isIdleTimerDisabled = keepAwake
             engine.autoPauseEnabled = autoPause
             engine.indoorMode = indoorMode
+            engine.floorEstimator.floorHeight = floorHeight
         }
+        .onChange(of: floorHeight) { _, v in engine.floorEstimator.floorHeight = v }
         .onChange(of: indoorMode) { _, v in engine.indoorMode = v }
         .onChange(of: keepAwake) { _, v in UIApplication.shared.isIdleTimerDisabled = v }
         .onChange(of: autoPause) { _, v in engine.autoPauseEnabled = v }

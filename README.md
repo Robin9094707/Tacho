@@ -15,6 +15,11 @@ Geschwindigkeitsmesser für iOS 26 im Liquid-Glass-Design.
   Kamera-Tracking (ARKit, mit LiDAR wo vorhanden) bzw. den Schrittzähler um und setzt die Route fort.
   LiDAR-Raumerkennung (Wände, Boden, Decke, Türen, Fenster, Tische, Sitze, Bodenfläche, Raumhöhe,
   Abstand nach vorn) und eine Live-Kameraansicht mit 3D-Raumgitter. In Fahrzeugen bleibt GPS maßgeblich.
+- **Sensorfusion (1.3)**: Innen/Außen-Erkennung aus Satelliten-Doppler vs. WLAN-Ortung, Fix-Rate,
+  Höhengenauigkeit, Apple-Indoor-Karten, Magnetfeld-Störungen, LiDAR-Decke/-Wände und Kamera-Helligkeit.
+  Etagen über absolute Barometer-Höhe relativ zur draußen gelernten (und pro Ort gemerkten) Straßenhöhe,
+  Treppen-/Aufzugerkennung, Gyroskop & Magnetometer in der Zug/Auto-Unterscheidung,
+  sparsames Kamera-Tracking und adaptive Sensorrate.
 - **Sprint-Messung** 0–20 … 0–200 km/h mit Bestenliste
 - **Rekorde**: Höchstwerte je Fortbewegungsart, Wochenstatistik
 - Live-Karte, Geschwindigkeitswarnung mit Haptik, G-Kraft, Kompass, 5 Farbschemata, km/h · mph · m/s · kn

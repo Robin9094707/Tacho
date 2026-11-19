@@ -132,8 +132,7 @@ struct IndoorScanScreen: View {
     }
 
     private var floorText: String {
-        let f = engine.floor
-        return f == 0 ? "EG" : (f > 0 ? "\(f). OG" : "\(-f). UG")
+        FloorFormat.text(engine.floor)
     }
 
     private func row(_ symbol: String, _ title: String, _ value: String) -> some View {
