@@ -408,7 +408,13 @@ struct SpeedometerScreen: View {
             Text(engine.manualActivity != nil ? "Manuell festgelegt: \(engine.activity.title)" : engine.detected.reason)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
+            if let station = engine.place.nearestStation {
+                Label("In der Nähe: \(station)", systemImage: "tram.fill")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
             HStack(spacing: 16) {
+                metric("Schritte/min", engine.motion.stepCadence > 0 ? String(format: "%.0f", engine.motion.stepCadence * 60) : "–")
                 metric("Erschütterung", String(format: "%.3f g", engine.motion.vibration))
                 metric("Rhythmus", String(format: "%.1f Hz", engine.motion.cadence))
                 metric("Sicherheit", "\(Int(engine.detected.confidence * 100)) %")

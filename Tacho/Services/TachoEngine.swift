@@ -223,7 +223,10 @@ final class TachoEngine {
                                      altitude: location.altitude,
                                      vibration: motion.vibration,
                                      cadence: motion.cadence,
-                                     system: motion.systemActivity)
+                                     system: motion.systemActivity,
+                                     stepCadence: motion.pedometerUpdated.map { Date.now.timeIntervalSince($0) < 4 } == true
+                                        ? motion.stepCadence : 0,
+                                     nearStation: place.nearestStation != nil)
     }
 
     private func handle(_ loc: CLLocation, speed v: Double) {

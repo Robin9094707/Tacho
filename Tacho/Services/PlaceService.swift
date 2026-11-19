@@ -1,5 +1,6 @@
 import Foundation
 import CoreLocation
+import MapKit
 import Observation
 
 /// Erkennt Orte (Straße, Stadt, Points of Interest wie Bahnhöfe) und die
@@ -31,6 +32,8 @@ final class PlaceService {
     var street: String?
     var locality: String?
     var pointOfInterest: String?
+    /// Name eines Bahnhofs / einer Station im Umkreis von ~350 m.
+    var nearestStation: String?
     var surroundings: Surroundings = .noSignal
     var signalQuality: Double = 0   // 0…1
 
@@ -38,6 +41,8 @@ final class PlaceService {
     @ObservationIgnored private var lastGeocoded: CLLocation?
     @ObservationIgnored private var lastGeocodeDate = Date.distantPast
     @ObservationIgnored private var accuracyHistory: [Double] = []
+    @ObservationIgnored private var lastStationLookup: CLLocation?
+    @ObservationIgnored private var lastStationDate = Date.distantPast
 
     var shortDescription: String {
         if let poi = pointOfInterest { return poi }
@@ -75,6 +80,28 @@ final class PlaceService {
         signalQuality = max(0, min(1, (1 - (avgAcc - 3) / 60))) * freshness
 
         geocodeIfNeeded(location)
+        lookupStationIfNeeded(location)
+    }
+
+    /// Sucht Bahnhöfe in der Nähe – ein Hinweis für die Zug-Erkennung.
+    private func lookupStationIfNeeded(_ location: CLLocation) {
+        let moved = lastStationLookup.map { location.distance(from: $0) } ?? .infinity
+        guard moved > 400 || Date.now.timeIntervalSince(lastStationDate) > 120,
+              Date.now.timeIntervalSince(lastStationDate) > 20 else { return }
+        lastStationLookup = location
+        lastStationDate = .now
+        let request = MKLocalPointsOfInterestRequest(center: location.coordinate, radius: 350)
+        request.pointOfInterestFilter = MKPointOfInterestFilter(including: [.publicTransport])
+        Task { @MainActor in
+            let items = (try? await MKLocalSearch(request: request).start())?.mapItems ?? []
+            let keywords = ["bahnhof", "hbf", "station", "s-bahn", "u-bahn", "gleis", "railway"]
+            let prefixes = ["s ", "u ", "s+u "]   // z. B. „S Ostkreuz“, „U Alexanderplatz“
+            let station = items.first { item in
+                let n = (item.name ?? "").lowercased()
+                return keywords.contains { n.contains($0) } || prefixes.contains { n.hasPrefix($0) }
+            }
+            self.nearestStation = station?.name
+        }
     }
 
     private func geocodeIfNeeded(_ location: CLLocation) {

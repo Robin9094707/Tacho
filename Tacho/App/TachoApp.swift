@@ -4,13 +4,26 @@ import SwiftData
 @main
 struct TachoApp: App {
     @State private var engine = TachoEngine()
+    @State private var showSplash = true
 
     var body: some Scene {
         WindowGroup {
-            RootView()
-                .environment(engine)
-                .preferredColorScheme(.dark)
-                .onAppear { engine.start() }
+            ZStack {
+                RootView()
+                    .scaleEffect(showSplash ? 0.92 : 1)
+                    .opacity(showSplash ? 0 : 1)
+                    .blur(radius: showSplash ? 12 : 0)
+                if showSplash {
+                    SplashView {
+                        withAnimation(.spring(response: 0.6, dampingFraction: 0.85)) { showSplash = false }
+                    }
+                    .transition(.opacity)
+                    .zIndex(1)
+                }
+            }
+            .environment(engine)
+            .preferredColorScheme(.dark)
+            .onAppear { engine.start() }
         }
         .modelContainer(for: [Trip.self, SprintResult.self])
     }
