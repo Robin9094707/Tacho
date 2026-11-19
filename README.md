@@ -11,6 +11,10 @@ Geschwindigkeitsmesser für iOS 26 im Liquid-Glass-Design.
   (Diagramm-Scrubbing zeigt die Stelle auf der Karte), GPX-Export
 - **Orte & Räume**: Straße/Stadt/POI (z. B. Bahnhof), Umgebung (freier Himmel / Stadt / Innenraum-Tunnel),
   **Etagenerkennung** per Barometer, Luftdruck
+- **Innenraum-Messung (neu in 1.1)**: Wird das GPS drinnen ungenau, schaltet Tacho automatisch auf
+  Kamera-Tracking (ARKit, mit LiDAR wo vorhanden) bzw. den Schrittzähler um und setzt die Route fort.
+  LiDAR-Raumerkennung (Wände, Boden, Decke, Türen, Fenster, Tische, Sitze, Bodenfläche, Raumhöhe,
+  Abstand nach vorn) und eine Live-Kameraansicht mit 3D-Raumgitter. In Fahrzeugen bleibt GPS maßgeblich.
 - **Sprint-Messung** 0–20 … 0–200 km/h mit Bestenliste
 - **Rekorde**: Höchstwerte je Fortbewegungsart, Wochenstatistik
 - Live-Karte, Geschwindigkeitswarnung mit Haptik, G-Kraft, Kompass, 5 Farbschemata, km/h · mph · m/s · kn

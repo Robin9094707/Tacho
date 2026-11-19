@@ -13,6 +13,7 @@ struct SpeedometerScreen: View {
     @State private var showStopDialog = false
     @State private var showSprint = false
     @State private var showHUD = false
+    @State private var showIndoor = false
     @State private var savedTrip: Trip?
     @Namespace private var glassNS
 
@@ -38,6 +39,7 @@ struct SpeedometerScreen: View {
                     sparkline
                     controls
                     statsGrid
+                    indoorCard
                     environmentCard
                     detectionCard
                 }
@@ -77,6 +79,9 @@ struct SpeedometerScreen: View {
             }
             .sheet(item: $savedTrip) { trip in
                 NavigationStack { TripDetailView(trip: trip) }
+            }
+            .fullScreenCover(isPresented: $showIndoor) {
+                IndoorScanScreen()
             }
             .fullScreenCover(isPresented: $showHUD) {
                 HUDScreen(color: overLimit ? .red : colors[1])
@@ -157,7 +162,7 @@ struct SpeedometerScreen: View {
                       limit: limit,
                       unitLabel: unit.label,
                       colors: overLimit ? [.orange, .red, .red] : colors,
-                      subtitle: "Max \(String(format: "%.0f", unit.convert(engine.sessionMax)))")
+                      subtitle: "Max \(String(format: "%.0f", unit.convert(engine.sessionMax))) · \(engine.speedSource.title)")
                 .padding(.horizontal, 4)
                 .transition(.scale.combined(with: .opacity))
         case .digital:
@@ -258,6 +263,83 @@ struct SpeedometerScreen: View {
                      symbol: "location.north.line.fill", tint: .mint)
             StatTile(title: "G-Kraft", value: String(format: "%.2f g", engine.motion.gForce), symbol: "waveform.path.ecg", tint: .pink)
         }
+    }
+
+    private var indoorCard: some View {
+        let v = engine.visual
+        let src = engine.speedSource
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label("Messquelle", systemImage: "scope")
+                    .font(.headline)
+                Spacer()
+                Label(src.title, systemImage: src.symbol)
+                    .font(.footnote.weight(.bold))
+                    .padding(.horizontal, 12).padding(.vertical, 6)
+                    .glassEffect(.regular.tint((src.isIndoor ? Color.cyan : Color.green).opacity(0.35)), in: .capsule)
+                    .contentTransition(.symbolEffect(.replace))
+            }
+            HStack(spacing: 8) {
+                sourcePill(.gps, active: src == .gps, detail: engine.gpsIsGood ? "gut" : "schwach")
+                sourcePill(VisualOdometry.hasLiDAR ? .lidar : .visual,
+                           active: src == .visual || src == .lidar,
+                           detail: v.isRunning ? v.trackingText : "bereit")
+                sourcePill(.pedometer, active: src == .pedometer,
+                           detail: engine.motion.stepCadence > 0 ? String(format: "%.0f Schr./min", engine.motion.stepCadence * 60) : "\(engine.motion.steps) Schritte")
+            }
+            if v.isRunning {
+                HStack(spacing: 16) {
+                    metric("Kamera-Tempo", unit.formatSpeed(v.speed))
+                    metric("Kamera-Strecke", unit.formatDistance(v.distance))
+                    if let d = v.distanceAhead { metric("Abstand vorn", String(format: "%.2f m", d)) }
+                }
+                if !v.room.isEmpty {
+                    Text(roomSummary(v.room))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                Text(VisualOdometry.isSupported
+                     ? "Drinnen schaltet Tacho automatisch auf Kamera\(VisualOdometry.hasLiDAR ? " + LiDAR" : "")-Tracking bzw. Schrittzähler um. Halte die Kamera frei für beste Genauigkeit."
+                     : "Drinnen nutzt Tacho den Schrittzähler.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            if VisualOdometry.isSupported {
+                Button {
+                    showIndoor = true
+                } label: {
+                    Label(VisualOdometry.hasLiDAR ? "Kamera- & LiDAR-Ansicht" : "Kamera-Ansicht", systemImage: "camera.viewfinder")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 4)
+                }
+                .buttonStyle(.glass)
+            }
+        }
+        .padding(16)
+        .glassEffect(.regular, in: .rect(cornerRadius: 26))
+        .animation(.smooth, value: src)
+    }
+
+    private func sourcePill(_ s: SpeedSource, active: Bool, detail: String) -> some View {
+        VStack(spacing: 4) {
+            Image(systemName: s.symbol).font(.headline)
+            Text(s == .lidar ? "LiDAR" : s.title).font(.caption2.weight(.bold)).lineLimit(1)
+            Text(detail).font(.system(size: 9)).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.7)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 10)
+        .foregroundStyle(active ? Color.white : Color.secondary)
+        .glassEffect(active ? .regular.tint(colors[1].opacity(0.45)) : .regular, in: .rect(cornerRadius: 16))
+    }
+
+    private func roomSummary(_ r: VisualOdometry.RoomInfo) -> String {
+        var parts = RoomItem.items(for: r).map { "\($0.count) \($0.title)" }
+        if r.floorArea > 0 { parts.append(String(format: "≈ %.0f m² Boden", r.floorArea)) }
+        if let h = r.roomHeight { parts.append(String(format: "%.1f m hoch", h)) }
+        if r.meshSegments > 0 { parts.append("\(r.meshSegments) Scan-Segmente") }
+        return "Raum erkannt: " + parts.joined(separator: " · ")
     }
 
     private var environmentCard: some View {

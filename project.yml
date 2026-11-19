@@ -7,8 +7,8 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "1.0"
-    CURRENT_PROJECT_VERSION: "1"
+    MARKETING_VERSION: "1.1"
+    CURRENT_PROJECT_VERSION: "2"
     DEVELOPMENT_TEAM: ""
     TARGETED_DEVICE_FAMILY: "1"
     ENABLE_PREVIEWS: YES
@@ -49,5 +49,6 @@ targets:
         UIUserInterfaceStyle: Dark
         NSLocationWhenInUseUsageDescription: Tacho misst deine Geschwindigkeit per GPS und zeichnet deine Routen auf.
         NSLocationAlwaysAndWhenInUseUsageDescription: Damit Aufzeichnungen auch bei gesperrtem Bildschirm weiterlaufen, braucht Tacho Zugriff auf deinen Standort im Hintergrund.
+        NSCameraUsageDescription: Drinnen, wo GPS ungenau ist, misst Tacho Geschwindigkeit und Strecke über Kamera und LiDAR und erkennt Wände, Boden, Türen und Möbel. Bilder werden nicht gespeichert.
         NSMotionUsageDescription: Tacho nutzt Bewegungs- und Barometerdaten, um zu erkennen, ob du läufst, rennst, Rad, E-Scooter, Auto oder Zug fährst – und auf welcher Etage du bist.
         ITSAppUsesNonExemptEncryption: false

@@ -13,6 +13,7 @@ struct SettingsScreen: View {
     @AppStorage(Pref.keepAwake) private var keepAwake = true
     @AppStorage(Pref.theme) private var theme: Theme = .activity
     @AppStorage(Pref.haptics) private var haptics = true
+    @AppStorage(Pref.indoorMode) private var indoorMode: IndoorMode = .auto
     @State private var confirmWipe = false
 
     var body: some View {
@@ -70,6 +71,20 @@ struct SettingsScreen: View {
                     Text("Aufzeichnung")
                 } footer: {
                     Text("Mit „Immer“-Zugriff läuft die Aufzeichnung auch bei gesperrtem Bildschirm zuverlässig weiter.")
+                }
+
+                Section {
+                    Picker("Kamera-Tracking", selection: $indoorMode) {
+                        ForEach(IndoorMode.allCases) { Text($0.title).tag($0) }
+                    }
+                    LabeledContent("Kamera-Tracking", value: VisualOdometry.isSupported ? "unterstützt" : "nicht unterstützt")
+                    LabeledContent("LiDAR-Scanner", value: VisualOdometry.hasLiDAR ? "vorhanden" : "nicht vorhanden")
+                    LabeledContent("Schrittzähler", value: engine.motion.pedometerAvailable ? "verfügbar" : "nicht verfügbar")
+                    LabeledContent("Aktive Quelle", value: engine.speedSource.title)
+                } header: {
+                    Text("Innenräume")
+                } footer: {
+                    Text("Ist das GPS drinnen zu ungenau, misst Tacho über Kamera (und LiDAR) oder den Schrittzähler weiter und setzt deine Route auf der Karte fort. In Auto, Zug & Co. bleibt GPS maßgeblich, weil die Kamera dort nur das Fahrzeuginnere sieht. Kamera-Tracking braucht freie Sicht und etwas mehr Akku.")
                 }
 
                 Section("Live-Sensoren") {

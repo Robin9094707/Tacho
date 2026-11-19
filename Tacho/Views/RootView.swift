@@ -5,6 +5,7 @@ struct RootView: View {
     @Environment(TachoEngine.self) private var engine
     @AppStorage(Pref.keepAwake) private var keepAwake = true
     @AppStorage(Pref.autoPause) private var autoPause = true
+    @AppStorage(Pref.indoorMode) private var indoorMode: IndoorMode = .auto
     @State private var tab = 0
 
     var body: some View {
@@ -33,7 +34,9 @@ struct RootView: View {
         .onAppear {
             UIApplication.shared.isIdleTimerDisabled = keepAwake
             engine.autoPauseEnabled = autoPause
+            engine.indoorMode = indoorMode
         }
+        .onChange(of: indoorMode) { _, v in engine.indoorMode = v }
         .onChange(of: keepAwake) { _, v in UIApplication.shared.isIdleTimerDisabled = v }
         .onChange(of: autoPause) { _, v in engine.autoPauseEnabled = v }
     }
@@ -50,6 +53,11 @@ struct RecordingAccessory: View {
             Image(systemName: engine.activity.symbol)
                 .foregroundStyle(engine.activity.color)
                 .contentTransition(.symbolEffect(.replace))
+            if engine.speedSource != .gps {
+                Image(systemName: engine.speedSource.symbol)
+                    .foregroundStyle(.cyan)
+                    .contentTransition(.symbolEffect(.replace))
+            }
             if engine.isRecording {
                 Circle()
                     .fill(engine.state == .paused ? .orange : .red)

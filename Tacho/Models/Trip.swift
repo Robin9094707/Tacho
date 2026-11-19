@@ -11,6 +11,8 @@ struct TrackPoint: Codable, Hashable, Identifiable {
     var speed: Double        // m/s
     var accuracy: Double     // m
     var activity: ActivityType
+    /// Messquelle (fehlt bei älteren Aufzeichnungen).
+    var source: SpeedSource? = nil
 
     var id: Date { t }
     var coordinate: CLLocationCoordinate2D { .init(latitude: lat, longitude: lon) }

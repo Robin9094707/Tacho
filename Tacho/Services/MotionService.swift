@@ -8,6 +8,7 @@ final class MotionService {
     @ObservationIgnored private let activityManager = CMMotionActivityManager()
     @ObservationIgnored private let motionManager = CMMotionManager()
     @ObservationIgnored private let altimeter = CMAltimeter()
+    @ObservationIgnored private let pedometer = CMPedometer()
     @ObservationIgnored private let queue = OperationQueue()
 
     // iOS-Aktivitätserkennung
@@ -20,6 +21,17 @@ final class MotionService {
     /// Aktuelle Längs-/Gesamtbeschleunigung in g (ohne Schwerkraft).
     var gForce: Double = 0
     var peakGForce: Double = 0
+
+    // Schrittzähler (funktioniert auch in der Hosentasche und ohne GPS)
+    /// Geschwindigkeit aus der aktuellen Schritt-Pace in m/s.
+    var pedometerSpeed: Double = 0
+    /// Schritte pro Sekunde.
+    var stepCadence: Double = 0
+    var steps: Int = 0
+    /// Schrittbasierte Strecke seit App-Start in m.
+    var pedometerDistance: Double = 0
+    var pedometerUpdated: Date?
+    var pedometerAvailable: Bool { CMPedometer.isStepCountingAvailable() }
 
     // Barometer
     var pressureKPa: Double?
@@ -59,6 +71,22 @@ final class MotionService {
             }
         }
 
+        if CMPedometer.isStepCountingAvailable() {
+            pedometer.startUpdates(from: .now) { [weak self] data, _ in
+                guard let data else { return }
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    self.steps = data.numberOfSteps.intValue
+                    if let d = data.distance?.doubleValue { self.pedometerDistance = d }
+                    if let pace = data.currentPace?.doubleValue, pace > 0 {
+                        self.pedometerSpeed = 1 / pace
+                    }
+                    self.stepCadence = data.currentCadence?.doubleValue ?? 0
+                    self.pedometerUpdated = .now
+                }
+            }
+        }
+
         if CMAltimeter.isRelativeAltitudeAvailable() {
             altimeter.startRelativeAltitudeUpdates(to: .main) { [weak self] data, _ in
                 guard let self, let data else { return }
@@ -69,6 +97,12 @@ final class MotionService {
     }
 
     func resetPeak() { peakGForce = 0 }
+
+    /// Aktuelle Schritt-Geschwindigkeit, falls frisch (sonst 0 – man steht).
+    var freshPedometerSpeed: Double {
+        guard let u = pedometerUpdated, Date.now.timeIntervalSince(u) < 6 else { return 0 }
+        return pedometerSpeed
+    }
 
     /// Barometer-Nullpunkt neu setzen (z. B. „Ich bin im Erdgeschoss“).
     func recalibrateFloor() {

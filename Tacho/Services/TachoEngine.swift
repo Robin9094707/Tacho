@@ -12,6 +12,18 @@ final class TachoEngine {
     let location = LocationService()
     let motion = MotionService()
     let place = PlaceService()
+    let visual = VisualOdometry()
+
+    // Innenraum-Messung
+    var indoorMode: IndoorMode = .auto {
+        didSet { applyIndoorMode() }
+    }
+    var speedSource: SpeedSource = .gps
+    @ObservationIgnored private var indoorSince: Date?
+    @ObservationIgnored private var goodGPSSince: Date?
+    @ObservationIgnored private var lastVisualDistance: Double = 0
+    @ObservationIgnored private var lastPedometerDistance: Double = 0
+    @ObservationIgnored private var lastVirtualTick: Date?
 
     @ObservationIgnored private var classifier = ActivityClassifier()
     @ObservationIgnored private var tick: Timer?
@@ -56,7 +68,21 @@ final class TachoEngine {
     // Einstellungen (werden aus den Views gespiegelt)
     var autoPauseEnabled = true
 
-    var speed: Double { location.speed }
+    /// Fusionierte Geschwindigkeit in m/s – aus der jeweils besten Quelle.
+    var speed: Double {
+        switch speedSource {
+        case .gps: location.speed
+        case .visual, .lidar: visual.speed
+        case .pedometer: motion.freshPedometerSpeed
+        }
+    }
+
+    var gpsIsGood: Bool {
+        guard let fix = location.lastFix else { return false }
+        return Date.now.timeIntervalSince(fix) < 4
+            && location.horizontalAccuracy >= 0
+            && location.horizontalAccuracy <= 20
+    }
     var isRecording: Bool { state != .idle }
 
     var floor: Int { Int((motion.relativeAltitude / 3.2).rounded()) }
@@ -167,13 +193,15 @@ final class TachoEngine {
 
     private func onTick() {
         place.update(location: location.location, lastFix: location.lastFix)
+        updateSpeedSource()
 
-        // Wenn keine GPS-Updates mehr kommen (Tunnel), Geschwindigkeit langsam abklingen lassen
-        if let fix = location.lastFix, Date.now.timeIntervalSince(fix) > 4 {
-            classify(speed: location.speed)
+        if speedSource != .gps {
+            virtualStep()
+        } else if let fix = location.lastFix, Date.now.timeIntervalSince(fix) > 4 {
+            classify(speed: speed)
         }
 
-        speedHistory.append(location.speed)
+        speedHistory.append(speed)
         if speedHistory.count > 120 { speedHistory.removeFirst(speedHistory.count - 120) }
 
         if let start = startDate, state != .idle {
@@ -199,6 +227,12 @@ final class TachoEngine {
     }
 
     private func handle(_ loc: CLLocation, speed v: Double) {
+        // Visuellen Ankerpunkt mit gutem GPS aktuell halten
+        if visual.isRunning, gpsIsGood, loc.horizontalAccuracy <= 10 {
+            visual.reanchor(loc)
+        }
+        guard speedSource == .gps else { return }
+
         sessionMax = max(sessionMax, v)
         classify(speed: v)
         handleSprint(loc, speed: v)
@@ -249,7 +283,126 @@ final class TachoEngine {
                                  alt: loc.altitude,
                                  speed: v,
                                  accuracy: loc.horizontalAccuracy,
-                                 activity: activity))
+                                 activity: activity,
+                                 source: .gps))
+    }
+
+    // MARK: - Innenraum
+
+    private func applyIndoorMode() {
+        switch indoorMode {
+        case .off:
+            if visual.isRunning && !visual.startedManually { visual.stop() }
+        case .always:
+            if !visual.isRunning { visual.start(anchor: location.location) }
+        case .auto:
+            break
+        }
+    }
+
+    /// Kamera-Tracking manuell starten/stoppen (z. B. aus der Kamera-Ansicht).
+    func setVisualTracking(_ on: Bool) {
+        if on {
+            visual.start(anchor: location.location, manual: true)
+        } else {
+            visual.stop()
+        }
+    }
+
+    /// Wählt die beste Geschwindigkeitsquelle und startet/stoppt das Kamera-Tracking automatisch.
+    private func updateSpeedSource() {
+        let now = Date.now
+        let indoor = !gpsIsGood || place.surroundings == .indoor || place.surroundings == .noSignal
+        // In Fahrzeugen sieht die Kamera nur den Innenraum (≈ 0 km/h) – dann bleibt GPS maßgeblich.
+        let recentFix = location.lastFix.map { now.timeIntervalSince($0) < 20 } ?? false
+        let vehicles: [ActivityType] = [.car, .train, .plane, .eScooter, .cycling]
+        let inVehicle = (vehicles.contains(detected.activity) || vehicles.contains(manualActivity ?? .unknown)
+                         || location.speed > 4) && recentFix
+
+        if indoor {
+            goodGPSSince = nil
+            if indoorSince == nil { indoorSince = now }
+        } else {
+            indoorSince = nil
+            if goodGPSSince == nil { goodGPSSince = now }
+        }
+
+        if indoorMode == .auto && VisualOdometry.isSupported {
+            if let since = indoorSince, now.timeIntervalSince(since) > 5, !visual.isRunning, !inVehicle {
+                visual.start(anchor: location.location)
+            }
+            if let since = goodGPSSince, now.timeIntervalSince(since) > 15,
+               visual.isRunning, !visual.startedManually {
+                visual.stop()
+            }
+        }
+
+        let visualFresh = visual.isRunning && visual.trackingOK
+            && (visual.lastGoodUpdate.map { now.timeIntervalSince($0) < 2 } ?? false)
+        let pedometerFresh = motion.pedometerUpdated.map { now.timeIntervalSince($0) < 6 } ?? false
+
+        let newSource: SpeedSource
+        if inVehicle && !visual.startedManually {
+            newSource = .gps
+        } else if visualFresh && (indoor || indoorMode == .always || visual.startedManually) {
+            newSource = visual.usesLiDAR ? .lidar : .visual
+        } else if indoor && pedometerFresh {
+            newSource = .pedometer
+        } else {
+            newSource = .gps
+        }
+
+        if newSource != speedSource {
+            lastVisualDistance = visual.distance
+            lastPedometerDistance = motion.pedometerDistance
+            lastVirtualTick = nil
+            lastRecorded = nil
+            lastMovingTick = nil
+            speedSource = newSource
+        }
+    }
+
+    /// Ein Messschritt ohne GPS: Distanz, Punkte und Statistik aus Kamera bzw. Schrittzähler.
+    private func virtualStep() {
+        let v = speed
+        sessionMax = max(sessionMax, v)
+        classify(speed: v)
+
+        let delta: Double
+        switch speedSource {
+        case .visual, .lidar:
+            delta = max(0, visual.distance - lastVisualDistance)
+            lastVisualDistance = visual.distance
+        case .pedometer:
+            delta = max(0, motion.pedometerDistance - lastPedometerDistance)
+            lastPedometerDistance = motion.pedometerDistance
+        case .gps:
+            delta = 0
+        }
+
+        guard state == .recording else { lastVirtualTick = .now; return }
+
+        let now = Date.now
+        let moving = v > 0.3
+        autoPaused = autoPauseEnabled && !moving
+        if let last = lastVirtualTick {
+            let dt = now.timeIntervalSince(last)
+            if dt > 0, dt < 10, moving || !autoPauseEnabled { movingTime += dt }
+        }
+        lastVirtualTick = now
+        if delta < 50 { distance += delta }
+        maxSpeed = max(maxSpeed, v)
+
+        let coord = visual.estimatedCoordinate ?? location.location?.coordinate
+        guard let coord, moving || points.isEmpty else { return }
+        points.append(TrackPoint(t: now,
+                                 lat: coord.latitude,
+                                 lon: coord.longitude,
+                                 alt: location.altitude,
+                                 speed: v,
+                                 accuracy: speedSource == .pedometer ? 50 : 2,
+                                 activity: activity,
+                                 source: speedSource))
     }
 
     private func handleSprint(_ loc: CLLocation, speed v: Double) {
